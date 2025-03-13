@@ -1,0 +1,625 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Dodgeball v5</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <!-- Include Howler.js for sound effects and background music -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/howler/2.2.3/howler.min.js"></script>
+  <style>
+    /* Base Styles */
+    html, body {
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      background: #000;
+      font-family: Arial, sans-serif;
+    }
+    canvas {
+      display: block;
+    }
+    
+    /* Main Menu Overlay */
+    .overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0,0,0,0.85);
+      color: white;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      z-index: 10;
+      pointer-events: auto;
+    }
+    .overlay h1 {
+      margin-bottom: 20px;
+      font-size: 48px;
+      /* Rainbow effect will be applied in the animation loop */
+    }
+    .overlay p,
+    .overlay label {
+      margin: 10px;
+      font-size: 20px;
+    }
+    .overlay button {
+      margin-top: 20px;
+      padding: 10px 20px;
+      font-size: 24px;
+      cursor: pointer;
+    }
+    
+    /* Timer & Health Bar Display */
+    #timerDisplay {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      color: white;
+      font-size: 24px;
+      z-index: 5;
+    }
+    #healthBar {
+      position: absolute;
+      top: 40px;
+      left: 10px;
+      width: 100px;
+      height: 20px;
+      border: 2px solid white;
+      z-index: 5;
+    }
+    #healthFill {
+      height: 100%;
+      background: green;
+      width: 100%;
+    }
+    
+    /* Final Time Display on Menu */
+    #finalTimeMenu {
+      margin-top: 10px;
+      font-size: 20px;
+      color: lightgray;
+    }
+    
+    /* Pause Text (centered) */
+    #pauseText {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      font-size: 48px;
+      color: white;
+      z-index: 6;
+      display: none;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="canvas"></canvas>
+  
+  <!-- Main Menu Overlay -->
+  <div id="startMenu" class="overlay">
+    <h1 id="menuTitle">Dodgeball v5</h1>
+    <p>Select Control Mode:</p>
+    <div>
+      <label>
+        <input type="radio" name="mode" value="mouse" checked> Mouse Control
+      </label>
+      <label>
+        <input type="radio" name="mode" value="keyboard"> Keyboard Control
+      </label>
+    </div>
+    <p>Select Difficulty:</p>
+    <div>
+      <label>
+        <input type="radio" name="difficulty" value="normal" checked> Normal
+      </label>
+      <label>
+        <input type="radio" name="difficulty" value="extra"> Extra Difficulty
+      </label>
+    </div>
+    <button id="startButton">Start Game</button>
+    <p id="finalTimeMenu"></p>
+  </div>
+  
+  <!-- Pause Text -->
+  <div id="pauseText">Paused</div>
+  
+  <!-- Timer and Health Bar Display -->
+  <div id="timerDisplay"></div>
+  <div id="healthBar"><div id="healthFill"></div></div>
+  
+  <script>
+    // Background Music: A mellow synth track loaded from a free resource.
+    var bgMusic = new Howl({
+      src: ['https://cdn.pixabay.com/download/audio/2021/10/10/audio_dfff3f7a68.mp3?filename=relaxed-ambient-118445.mp3'],
+      autoplay: true,
+      loop: true,
+      volume: 0.3
+    });
+    
+    // Spark Sound Effect
+    var sparkSFX = new Howl({
+      src: ['https://actions.google.com/sounds/v1/alarms/beep_short.ogg'],
+      volume: 1.0
+    });
+    
+    // Explosion Sound Effect
+    var explosionSFX = new Howl({
+      src: ['https://actions.google.com/sounds/v1/explosions/explosion.ogg'],
+      volume: 1.0
+    });
+    
+    // Global variables
+    let gameState = "menu"; // "menu", "playing", "finalExplosion"
+    let controlMode = "mouse"; // "mouse" or "keyboard"
+    let difficultyMultiplier = 1;
+    
+    let isPaused = false;
+    let pauseKeyPressed = false;
+    
+    const player = { x: 0, y: 0, size: 20, speed: 200, hp: 100 };
+    
+    let circles = [];
+    let explosions = [];
+    let finalParticles = [];
+    let hitParticles = [];
+    let scoreTimer = 0;
+    let finalTime = 0;
+    let spawnInterval;
+    let lastTime;
+    let immunityTimer = 0;
+    
+    // Global array for gold particles emitted by super balls.
+    let rareParticles = [];
+    
+    // Golden explosion function: creates a huge golden spark effect and repels other circles.
+    function goldenExplosion(x, y) {
+      // Spawn 100 golden particles at (x,y)
+      for (let i = 0; i < 100; i++) {
+          finalParticles.push(new Particle(x, y, "rgb(255,215,0)"));
+      }
+      // Repel all other circles away from the explosion center.
+      circles.forEach(circle => {
+          let dx = circle.x - x;
+          let dy = circle.y - y;
+          let dist = Math.sqrt(dx * dx + dy * dy);
+          if (dist > 0) {
+              const force = 500; // Adjust this constant to control the repulsion strength
+              circle.vx += (dx / dist) * force;
+              circle.vy += (dy / dist) * force;
+          }
+      });
+      // Play the explosion sound effect.
+      explosionSFX.play();
+    }
+    
+    window.onload = function() {
+      const canvas = document.getElementById("canvas");
+      const ctx = canvas.getContext("2d");
+      const timerDisplay = document.getElementById("timerDisplay");
+      const healthFill = document.getElementById("healthFill");
+      const startMenu = document.getElementById("startMenu");
+      const menuTitle = document.getElementById("menuTitle");
+      const finalTimeMenu = document.getElementById("finalTimeMenu");
+      const pauseText = document.getElementById("pauseText");
+      
+      function resizeCanvas() {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+      }
+      window.addEventListener("resize", resizeCanvas);
+      resizeCanvas();
+      
+      // Set player starting position.
+      player.x = canvas.width / 2;
+      player.y = canvas.height / 2;
+  
+      const mouse = { x: player.x, y: player.y };
+      window.addEventListener("mousemove", (e) => {
+        if (controlMode === "mouse") {
+          mouse.x = e.clientX;
+          mouse.y = e.clientY;
+        }
+      });
+      
+      const keys = { w:false, a:false, s:false, d:false, ArrowUp:false, ArrowLeft:false, ArrowDown:false, ArrowRight:false };
+      window.addEventListener("keydown", (e) => {
+        if (["w", "a", "s", "d", "ArrowUp", "ArrowLeft", "ArrowDown", "ArrowRight"].includes(e.key)) {
+          e.preventDefault();
+        }
+        if (e.key.toLowerCase() === "p" && gameState === "playing") {
+          if (!pauseKeyPressed) {
+            pauseKeyPressed = true;
+            isPaused = !isPaused;
+          }
+        }
+        keys[e.key] = true;
+      });
+      window.addEventListener("keyup", (e) => {
+        if (e.key.toLowerCase() === "p") {
+          pauseKeyPressed = false;
+        }
+        keys[e.key] = false;
+      });
+      
+      /*************************
+       * Class Definitions
+       *************************/
+      class Circle {
+        constructor(x, y, vx, vy, radius, color){
+          this.x = x;
+          this.y = y;
+          this.vx = vx;
+          this.vy = vy;
+          this.radius = radius;
+          this.color = color;
+          this.maxSpeed = 200 * difficultyMultiplier;
+          this.homingFactor = 0.8 * difficultyMultiplier;
+          this.rare = false;
+        }
+        update(dt){
+          let dx = player.x - this.x;
+          let dy = player.y - this.y;
+          let distance = Math.sqrt(dx * dx + dy * dy);
+          if (distance > 0) {
+            dx /= distance;
+            dy /= distance;
+            this.vx += dx * this.homingFactor * 100 * dt;
+            this.vy += dy * this.homingFactor * 100 * dt;
+          }
+          let speed = Math.sqrt(this.vx * this.vx + this.vy * this.vy);
+          if (speed > this.maxSpeed) {
+            this.vx = (this.vx / speed) * this.maxSpeed;
+            this.vy = (this.vy / speed) * this.maxSpeed;
+          }
+          this.x += this.vx * dt;
+          this.y += this.vy * dt;
+        }
+        draw(ctx){
+          ctx.beginPath();
+          ctx.fillStyle = this.color;
+          ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+      
+      // RareCircle extends Circle.
+      // It moves faster, homes better, glows with a golden halo, emits gold particles, and lasts 15 seconds.
+      class RareCircle extends Circle {
+        constructor(x, y, vx, vy, radius, color){
+          super(x, y, vx, vy, radius, color);
+          this.rare = true;
+          this.maxSpeed = 400 * difficultyMultiplier;
+          this.homingFactor = 3.0 * difficultyMultiplier; // Increased homing
+          this.lifetime = 0; // Time elapsed in seconds
+        }
+        update(dt){
+          this.lifetime += dt;
+          // Emit a gold particle with a 10% chance on each update.
+          if (Math.random() < 0.1) {
+            rareParticles.push(new Particle(this.x, this.y, "rgb(255,215,0)"));
+          }
+          super.update(dt);
+        }
+        draw(ctx){
+          ctx.save();
+          // Create a glowing golden halo.
+          ctx.shadowColor = "gold";
+          ctx.shadowBlur = 20;
+          ctx.fillStyle = this.color;
+          ctx.beginPath();
+          ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+          // Draw a solid gold outline.
+          ctx.lineWidth = 3;
+          ctx.strokeStyle = "gold";
+          ctx.beginPath();
+          ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+      }
+      
+      class Explosion {
+        constructor(x, y){
+          this.x = x;
+          this.y = y;
+          this.life = 0;
+          this.duration = 0.5;
+          this.startRadius = 10;
+          this.endRadius = 50;
+        }
+        update(dt){ this.life += dt; }
+        draw(ctx){
+          const progress = this.life / this.duration;
+          const radius = this.startRadius + (this.endRadius - this.startRadius) * progress;
+          const alpha = 1 - progress;
+          ctx.beginPath();
+          ctx.fillStyle = `rgba(255,255,255,${alpha.toFixed(2)})`;
+          ctx.arc(this.x, this.y, radius, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+      
+      class Particle {
+        constructor(x, y, color){
+          this.x = x;
+          this.y = y;
+          this.vx = (Math.random() * 2 - 1) * 300;
+          this.vy = (Math.random() * 2 - 1) * 300;
+          this.life = 0;
+          this.duration = 1.0;
+          this.color = color;
+          this.size = Math.random() * 3 + 2;
+        }
+        update(dt){
+          this.x += this.vx * dt;
+          this.y += this.vy * dt;
+          this.life += dt;
+        }
+        draw(ctx){
+          let progress = this.life / this.duration;
+          if (progress > 1) progress = 1;
+          let alpha = 1 - progress;
+          let rgbaColor = this.color.replace("rgb", "rgba").replace(")", `,${alpha.toFixed(2)})`);
+          ctx.fillStyle = rgbaColor;
+          ctx.beginPath();
+          ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+      
+      /*************************
+       * Game Functions
+       *************************/
+      function spawnCircle(){
+        if (gameState !== "playing") return;
+        let x, y;
+        const edge = Math.floor(Math.random() * 4);
+        if (edge === 0) {
+          x = Math.random() * canvas.width;
+          y = -20;
+        } else if (edge === 1) {
+          x = canvas.width + 20;
+          y = Math.random() * canvas.height;
+        } else if (edge === 2) {
+          x = Math.random() * canvas.width;
+          y = canvas.height + 20;
+        } else {
+          x = -20;
+          y = Math.random() * canvas.height;
+        }
+        const vx = (Math.random() * 2 - 1) * 100 * difficultyMultiplier;
+        const vy = (Math.random() * 2 - 1) * 100 * difficultyMultiplier;
+        const radius = 10;
+        const r = Math.floor(Math.random() * 256);
+        const g = Math.floor(Math.random() * 256);
+        const b = Math.floor(Math.random() * 256);
+        // 5% chance to spawn a rare (golden/super) ball.
+        if (Math.random() < 0.05) {
+          circles.push(new RareCircle(x, y, vx, vy, radius, "rgb(255,215,0)"));
+        } else {
+          circles.push(new Circle(x, y, vx, vy, radius, `rgb(${r},${g},${b})`));
+        }
+      }
+      
+      function spawnHitSparks(){
+        for (let i = 0; i < 20; i++){
+          let spark = new Particle(player.x, player.y, "rgb(255,255,255)");
+          spark.duration = 0.5;
+          hitParticles.push(spark);
+        }
+        sparkSFX.play();
+      }
+      
+      function checkCollisions(){
+        for (let i = circles.length - 1; i >= 0; i--){
+          const circle = circles[i];
+          const dx = circle.x - player.x;
+          const dy = circle.y - player.y;
+          const distance = Math.sqrt(dx * dx + dy * dy);
+          if (distance < circle.radius + player.size / 2){
+            if (immunityTimer <= 0){
+              // If it's a golden ball, do extra damage.
+              if (circle.rare) {
+                player.hp = Math.max(player.hp - 75, 0);
+                // Trigger the huge golden explosion effect.
+                goldenExplosion(circle.x, circle.y);
+              } else {
+                player.hp = Math.max(player.hp - 50, 0);
+                spawnHitSparks();
+              }
+              immunityTimer = 2;
+            }
+            circles.splice(i, 1);
+            if (player.hp <= 0){
+              explosionSFX.play();
+              finalExplosion();
+            }
+            break;
+          }
+        }
+      }
+      
+      function updatePlayer(dt){
+        if (controlMode === "mouse"){
+          player.x += (mouse.x - player.x) * 10 * dt;
+          player.y += (mouse.y - player.y) * 10 * dt;
+        } else {
+          if (keys.w || keys.ArrowUp) player.y -= player.speed * dt;
+          if (keys.a || keys.ArrowLeft) player.x -= player.speed * dt;
+          if (keys.s || keys.ArrowDown) player.y += player.speed * dt;
+          if (keys.d || keys.ArrowRight) player.x += player.speed * dt;
+          player.x = Math.max(player.size / 2, Math.min(canvas.width - player.size / 2, player.x));
+          player.y = Math.max(player.size / 2, Math.min(canvas.height - player.size / 2, player.y));
+        }
+      }
+      
+      function drawPlayer(){
+        ctx.fillStyle = "white";
+        ctx.fillRect(player.x - player.size / 2, player.y - player.size / 2, player.size, player.size);
+        if (immunityTimer > 0){
+          const hue = (Date.now() / 10) % 360;
+          ctx.strokeStyle = `hsl(${hue},100%,50%)`;
+          ctx.lineWidth = 4;
+          ctx.strokeRect(player.x - player.size / 2 - 4, player.y - player.size / 2 - 4, player.size + 8, player.size + 8);
+        }
+      }
+      
+      function drawHealthBar(){
+        let perc = Math.max(0, Math.min(player.hp, 100));
+        healthFill.style.width = `${perc}px`;
+      }
+      
+      function finalExplosion(){
+        clearInterval(spawnInterval);
+        for (let i = 0; i < 50; i++){
+          finalParticles.push(new Particle(player.x, player.y, "rgb(255,255,255)"));
+        }
+        circles.forEach(circle => {
+          for (let i = 0; i < 20; i++){
+            finalParticles.push(new Particle(circle.x, circle.y, circle.color));
+          }
+        });
+        circles = [];
+        explosions = [];
+        gameState = "finalExplosion";
+      }
+      
+      function updateFinalExplosion(dt){
+        finalParticles.forEach(particle => particle.update(dt));
+        hitParticles.forEach(particle => particle.update(dt));
+        finalParticles = finalParticles.filter(p => p.life < p.duration);
+        hitParticles = hitParticles.filter(p => p.life < p.duration);
+        if (finalParticles.length === 0 && hitParticles.length === 0){
+          endGameFinal();
+        }
+      }
+      
+      function endGameFinal(){
+        gameState = "menu";
+        finalTime = scoreTimer;
+        finalTimeMenu.innerText = `Final Time: ${finalTime.toFixed(2)} s`;
+        startMenu.style.display = "flex";
+      }
+      
+      /*************************
+       * Golden Explosion Function
+       *************************/
+      function goldenExplosion(x, y) {
+        // Spawn a large burst of golden particles.
+        for (let i = 0; i < 100; i++){
+          finalParticles.push(new Particle(x, y, "rgb(255,215,0)"));
+        }
+        // Repel all remaining circles away from the explosion center.
+        circles.forEach(circle => {
+          let dx = circle.x - x;
+          let dy = circle.y - y;
+          let dist = Math.sqrt(dx * dx + dy * dy);
+          if (dist > 0) {
+            const force = 500; // Adjust repulsion force if needed.
+            circle.vx += (dx / dist) * force;
+            circle.vy += (dy / dist) * force;
+          }
+        });
+        // Play explosion sound.
+        explosionSFX.play();
+      }
+      
+      /*************************
+       * Main Animation Loop
+       *************************/
+      function animate(){
+        requestAnimationFrame(animate);
+        const now = performance.now();
+        const dt = (now - lastTime) / 1000;
+        lastTime = now;
+        
+        if (gameState === "playing"){
+          if (!isPaused){
+            scoreTimer += dt;
+            if (player.hp > 0){
+              player.hp = Math.min(player.hp + 1 * dt, 100);
+            }
+            updatePlayer(dt);
+            checkCollisions();
+            circles.forEach(circle => circle.update(dt));
+            // Remove golden balls (rare balls) that have existed longer than 15 seconds.
+            circles = circles.filter(circle => !(circle.rare && circle.lifetime > 15));
+            explosions.forEach(explosion => explosion.update(dt));
+            hitParticles.forEach(particle => particle.update(dt));
+            rareParticles.forEach(particle => particle.update(dt));
+            rareParticles = rareParticles.filter(p => p.life < p.duration);
+            if (immunityTimer > 0){
+              immunityTimer -= dt;
+              if (immunityTimer < 0){ immunityTimer = 0; }
+            }
+          }
+        } else if (gameState === "finalExplosion"){
+          updateFinalExplosion(dt);
+        }
+        
+        ctx.fillStyle = "rgba(0,0,0,0.2)";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        
+        if (gameState === "playing"){
+          circles.forEach(circle => circle.draw(ctx));
+          explosions.forEach(explosion => explosion.draw(ctx));
+          hitParticles.forEach(particle => particle.draw(ctx));
+          rareParticles.forEach(particle => particle.draw(ctx));
+          drawPlayer();
+          timerDisplay.innerText = `Time: ${scoreTimer.toFixed(2)} s`;
+          drawHealthBar();
+        } else if (gameState === "finalExplosion"){
+          finalParticles.forEach(particle => particle.draw(ctx));
+          hitParticles.forEach(particle => particle.draw(ctx));
+        }
+        
+        let hue = (Date.now() / 10) % 360;
+        menuTitle.style.color = `hsl(${hue},100%,50%)`;
+        
+        if (isPaused && gameState === "playing"){
+          pauseText.style.display = "block";
+          pauseText.innerText = "Paused";
+        } else {
+          pauseText.style.display = "none";
+        }
+      }
+      animate();
+      
+      /*************************
+       * Menu Controls
+       *************************/
+      document.getElementById("startButton").addEventListener("click", () => {
+        controlMode = document.querySelector('input[name="mode"]:checked').value;
+        difficultyMultiplier = (document.querySelector('input[name="difficulty"]:checked').value === "extra") ? 2 : 1;
+        
+        player.x = canvas.width / 2;
+        player.y = canvas.height / 2;
+        player.hp = 100;
+        circles = [];
+        explosions = [];
+        finalParticles = [];
+        hitParticles = [];
+        rareParticles = [];
+        scoreTimer = 0;
+        finalTime = 0;
+        gameState = "playing";
+        lastTime = performance.now();
+        immunityTimer = 0;
+        isPaused = false;
+        pauseKeyPressed = false;
+        pauseText.style.display = "none";
+        clearInterval(spawnInterval);
+        spawnInterval = setInterval(spawnCircle, 800 / difficultyMultiplier);
+        
+        startMenu.style.display = "none";
+        // Background music is automatically playing.
+      });
+    };
+  </script>
+</body>
+</html>
