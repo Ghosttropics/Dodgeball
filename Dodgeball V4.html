@@ -1,0 +1,489 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Dodgeball V4</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    /* Base styles for full-screen canvas and overlays */
+    html, body {
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      background-color: #000;
+      font-family: Arial, sans-serif;
+    }
+    canvas {
+      display: block;
+    }
+    /* Overlay styling for the main menu */
+    .overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.85);
+      color: white;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      z-index: 10;
+    }
+    .overlay h1 {
+      margin-bottom: 20px;
+      /* Color will be updated via JavaScript for rainbow effect. */
+    }
+    .overlay p, .overlay label {
+      margin: 10px;
+    }
+    .overlay button {
+      margin-top: 20px;
+      padding: 10px 20px;
+      font-size: 18px;
+      cursor: pointer;
+    }
+    /* Timer display in the top-left corner */
+    #timerDisplay {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      color: white;
+      font-size: 24px;
+      z-index: 5;
+    }
+    /* Health bar display in the top-left corner */
+    #healthBar {
+      position: absolute;
+      top: 40px;
+      left: 10px;
+      width: 100px;
+      height: 20px;
+      border: 2px solid white;
+      z-index: 5;
+    }
+    #healthFill {
+      height: 100%;
+      background-color: green;
+      width: 100%;
+    }
+    /* Final time in the menu */
+    #finalTimeMenu {
+      margin-top: 10px;
+      font-size: 20px;
+      color: lightgray;
+    }
+  </style>
+</head>
+<body>
+  <!-- Game Canvas -->
+  <canvas id="canvas"></canvas>
+  
+  <!-- Main Menu Overlay (shown at start and after final explosion) -->
+  <div id="startMenu" class="overlay">
+    <h1 id="menuTitle">Dodgeball v4</h1>
+    <p>Select Control Mode:</p>
+    <div>
+      <label>
+        <input type="radio" name="mode" value="mouse" checked> Mouse Control
+      </label>
+      <label>
+        <input type="radio" name="mode" value="keyboard"> Keyboard Control
+      </label>
+    </div>
+    <p>Select Difficulty:</p>
+    <div>
+      <label>
+        <input type="radio" name="difficulty" value="normal" checked> Normal
+      </label>
+      <label>
+        <input type="radio" name="difficulty" value="extra"> Hard
+      </label>
+    </div>
+    <button id="startButton">Start Game</button>
+    <p id="finalTimeMenu"></p>
+  </div>
+  
+  <!-- Timer Display -->
+  <div id="timerDisplay"></div>
+  <!-- Health Bar -->
+  <div id="healthBar"><div id="healthFill"></div></div>
+  
+  <script>
+    window.onload = function() {
+      /*************************
+       * Global Variables & Setup
+       *************************/
+      const canvas = document.getElementById("canvas");
+      const ctx = canvas.getContext("2d");
+      const timerDisplay = document.getElementById("timerDisplay");
+      const healthFill = document.getElementById("healthFill");
+      const startMenu = document.getElementById("startMenu");
+      const menuTitle = document.getElementById("menuTitle");
+      const finalTimeMenu = document.getElementById("finalTimeMenu");
+      
+      function resizeCanvas() {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+      }
+      window.addEventListener("resize", resizeCanvas);
+      resizeCanvas();
+      
+      // Game state: "menu", "playing", "finalExplosion", or "gameOver"
+      let gameState = "menu";
+      // Control mode: "mouse" or "keyboard"
+      let controlMode = "mouse";
+      // Difficulty multiplier: 1 for Normal, 2 for Extra Difficulty
+      let difficultyMultiplier = 1;
+      
+      // The player is represented as a white square with health.
+      const player = {
+        x: canvas.width / 2,
+        y: canvas.height / 2,
+        size: 20,
+        speed: 200,  // For keyboard movement
+        hp: 100      // Health percentage (0-100)
+      };
+      
+      let circles = [];
+      let explosions = [];
+      let finalParticles = [];
+      let hitParticles = [];  // For white sparks when hit.
+      
+      let scoreTimer = 0;
+      let finalTime = 0;
+      let spawnInterval;
+      let lastTime;
+      
+      // Immunity Timer (in seconds)
+      let immunityTimer = 0;
+      
+      // Mouse position – used in mouse mode.
+      const mouse = { x: player.x, y: player.y };
+      window.addEventListener("mousemove", (e) => {
+        if (controlMode === "mouse") {
+          mouse.x = e.clientX;
+          mouse.y = e.clientY;
+        }
+      });
+      
+      // Keyboard Controls – record key states.
+      const keys = {
+        w: false, a: false, s: false, d: false,
+        ArrowUp: false, ArrowLeft: false, ArrowDown: false, ArrowRight: false
+      };
+      window.addEventListener("keydown", (e) => {
+        if (["w", "a", "s", "d", "ArrowUp", "ArrowLeft", "ArrowDown", "ArrowRight"].includes(e.key)) {
+          e.preventDefault();
+        }
+        keys[e.key] = true;
+      });
+      window.addEventListener("keyup", (e) => { keys[e.key] = false; });
+      
+      /*************************
+       * Class Definitions
+       *************************/
+      class Circle {
+        constructor(x, y, vx, vy, radius, color) {
+          this.x = x;
+          this.y = y;
+          this.vx = vx;
+          this.vy = vy;
+          this.radius = radius;
+          this.color = color;
+          this.maxSpeed = 200 * difficultyMultiplier;
+          this.homingFactor = 0.8 * difficultyMultiplier;
+        }
+        update(dt) {
+          let dx = player.x - this.x;
+          let dy = player.y - this.y;
+          let distance = Math.sqrt(dx * dx + dy * dy);
+          if (distance > 0) {
+            dx /= distance;
+            dy /= distance;
+            this.vx += dx * this.homingFactor * 100 * dt;
+            this.vy += dy * this.homingFactor * 100 * dt;
+          }
+          const speed = Math.sqrt(this.vx * this.vx + this.vy * this.vy);
+          if (speed > this.maxSpeed) {
+            this.vx = (this.vx / speed) * this.maxSpeed;
+            this.vy = (this.vy / speed) * this.maxSpeed;
+          }
+          this.x += this.vx * dt;
+          this.y += this.vy * dt;
+        }
+        draw(ctx) {
+          ctx.beginPath();
+          ctx.fillStyle = this.color;
+          ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+      
+      class Explosion {
+        constructor(x, y) {
+          this.x = x;
+          this.y = y;
+          this.life = 0;
+          this.duration = 0.5;
+          this.startRadius = 10;
+          this.endRadius = 50;
+        }
+        update(dt) {
+          this.life += dt;
+        }
+        draw(ctx) {
+          const progress = this.life / this.duration;
+          const radius = this.startRadius + (this.endRadius - this.startRadius) * progress;
+          const alpha = 1 - progress;
+          ctx.beginPath();
+          ctx.fillStyle = `rgba(255, 255, 255, ${alpha.toFixed(2)})`;
+          ctx.arc(this.x, this.y, radius, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+      
+      // Particle class for final explosions and sparks.
+      class Particle {
+        constructor(x, y, color) {
+          this.x = x;
+          this.y = y;
+          this.vx = (Math.random() * 2 - 1) * 300;
+          this.vy = (Math.random() * 2 - 1) * 300;
+          this.life = 0;
+          this.duration = 1.0;
+          this.color = color;
+          this.size = Math.random() * 3 + 2;
+        }
+        update(dt) {
+          this.x += this.vx * dt;
+          this.y += this.vy * dt;
+          this.life += dt;
+        }
+        draw(ctx) {
+          let progress = this.life / this.duration;
+          if (progress > 1) progress = 1;
+          let alpha = 1 - progress;
+          let rgbaColor = this.color.replace("rgb", "rgba").replace(")", `, ${alpha.toFixed(2)})`);
+          ctx.fillStyle = rgbaColor;
+          ctx.beginPath();
+          ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+      
+      /*************************
+       * Game Functions
+       *************************/
+      function spawnCircle() {
+        if (gameState !== "playing") return;
+        let x, y;
+        const edge = Math.floor(Math.random() * 4);
+        if (edge === 0) {       // Top
+          x = Math.random() * canvas.width;
+          y = -20;
+        } else if (edge === 1) { // Right
+          x = canvas.width + 20;
+          y = Math.random() * canvas.height;
+        } else if (edge === 2) { // Bottom
+          x = Math.random() * canvas.width;
+          y = canvas.height + 20;
+        } else {                // Left
+          x = -20;
+          y = Math.random() * canvas.height;
+        }
+        const vx = (Math.random() * 2 - 1) * 100 * difficultyMultiplier;
+        const vy = (Math.random() * 2 - 1) * 100 * difficultyMultiplier;
+        const radius = 10;
+        const r = Math.floor(Math.random() * 256);
+        const g = Math.floor(Math.random() * 256);
+        const b = Math.floor(Math.random() * 256);
+        const color = `rgb(${r}, ${g}, ${b})`;
+        circles.push(new Circle(x, y, vx, vy, radius, color));
+      }
+      
+      // Spawn hit sparks when the player is hit.
+      function spawnHitSparks() {
+        for (let i = 0; i < 20; i++) {
+          // Create a new particle, and set its duration to 0.5 for a quick dissipate.
+          let spark = new Particle(player.x, player.y, "rgb(255,255,255)");
+          spark.duration = 0.5;
+          hitParticles.push(spark);
+        }
+      }
+      
+      // Check for collisions between the player and circles.
+      function checkCollisions() {
+        for (let i = circles.length - 1; i >= 0; i--) {
+          const circle = circles[i];
+          const dx = circle.x - player.x;
+          const dy = circle.y - player.y;
+          const distance = Math.sqrt(dx * dx + dy * dy);
+          if (distance < circle.radius + player.size / 2) {
+            if (immunityTimer <= 0) {
+              // Reduce health on hit.
+              player.hp = Math.max(player.hp - 50, 0);
+              spawnHitSparks();
+              immunityTimer = 2; // 2 seconds immunity.
+            }
+            circles.splice(i, 1);
+            if (player.hp <= 0) {
+              finalExplosion();
+            }
+            break; // Process one collision per frame.
+          }
+        }
+      }
+      
+      // Update the player position.
+      function updatePlayer(dt) {
+        if (controlMode === "mouse") {
+          player.x += (mouse.x - player.x) * 10 * dt;
+          player.y += (mouse.y - player.y) * 10 * dt;
+        } else {
+          if (keys.w || keys.ArrowUp) player.y -= player.speed * dt;
+          if (keys.a || keys.ArrowLeft) player.x -= player.speed * dt;
+          if (keys.s || keys.ArrowDown) player.y += player.speed * dt;
+          if (keys.d || keys.ArrowRight) player.x += player.speed * dt;
+          player.x = Math.max(player.size / 2, Math.min(canvas.width - player.size / 2, player.x));
+          player.y = Math.max(player.size / 2, Math.min(canvas.height - player.size / 2, player.y));
+        }
+      }
+      
+      // Draw the player; if immune, draw a rainbow border.
+      function drawPlayer() {
+        ctx.fillStyle = "white";
+        ctx.fillRect(player.x - player.size / 2, player.y - player.size / 2, player.size, player.size);
+        if (immunityTimer > 0) {
+          const hue = (Date.now() / 10) % 360;
+          ctx.strokeStyle = `hsl(${hue}, 100%, 50%)`;
+          ctx.lineWidth = 4;
+          ctx.strokeRect(player.x - player.size / 2 - 4, player.y - player.size / 2 - 4, player.size + 8, player.size + 8);
+        }
+      }
+      
+      // Draw the health bar (width reflects current HP).
+      function drawHealthBar() {
+        let perc = Math.max(0, Math.min(player.hp, 100)); // clamp 0 to 100
+        healthFill.style.width = `${perc}px`;
+      }
+      
+      // Final explosion: Turn the player and all remaining circles into particles.
+      function finalExplosion() {
+        clearInterval(spawnInterval);
+        for (let i = 0; i < 50; i++) {
+          finalParticles.push(new Particle(player.x, player.y, "rgb(255,255,255)"));
+        }
+        circles.forEach(circle => {
+          for (let i = 0; i < 20; i++) {
+            finalParticles.push(new Particle(circle.x, circle.y, circle.color));
+          }
+        });
+        circles = [];
+        explosions = [];
+        gameState = "finalExplosion";
+      }
+      
+      function updateFinalExplosion(dt) {
+        finalParticles.forEach(particle => particle.update(dt));
+        hitParticles.forEach(particle => particle.update(dt));
+        finalParticles = finalParticles.filter(p => p.life < p.duration);
+        hitParticles = hitParticles.filter(p => p.life < p.duration);
+        if (finalParticles.length === 0 && hitParticles.length === 0) {
+          endGameFinal();
+        }
+      }
+      
+      // Once final explosion finishes, go back to main menu and display final time.
+      function endGameFinal() {
+        gameState = "menu";
+        finalTime = scoreTimer;
+        finalTimeMenu.innerText = `Final Time: ${finalTime.toFixed(2)} s`;
+        startMenu.style.display = "flex";
+      }
+      
+      /*************************
+       * Start & Restart Game
+       *************************/
+      function startGame() {
+        const selectedMode = document.querySelector('input[name="mode"]:checked').value;
+        controlMode = selectedMode;
+        const selectedDifficulty = document.querySelector('input[name="difficulty"]:checked').value;
+        difficultyMultiplier = (selectedDifficulty === "extra") ? 2 : 1;
+  
+        player.x = canvas.width / 2;
+        player.y = canvas.height / 2;
+        player.hp = 100;
+        circles = [];
+        explosions = [];
+        finalParticles = [];
+        hitParticles = [];
+        scoreTimer = 0;
+        finalTime = 0;
+        gameState = "playing";
+        lastTime = performance.now();
+        immunityTimer = 0;
+        clearInterval(spawnInterval);
+        spawnInterval = setInterval(spawnCircle, 800 / difficultyMultiplier);
+  
+        startMenu.style.display = "none";
+      }
+      
+      /*************************
+       * Main Animation Loop
+       *************************/
+      function animate() {
+        requestAnimationFrame(animate);
+        const now = performance.now();
+        const dt = (now - lastTime) / 1000;
+        lastTime = now;
+        
+        if (gameState === "playing") {
+          scoreTimer += dt;
+          // Recover HP at 1 per second (max 100)
+          player.hp = Math.min(player.hp + 1 * dt, 100);
+          circles.forEach(circle => circle.update(dt));
+          explosions.forEach(explosion => explosion.update(dt));
+          hitParticles.forEach(particle => particle.update(dt));
+          updatePlayer(dt);
+          checkCollisions();
+          if (immunityTimer > 0) {
+            immunityTimer -= dt;
+            if (immunityTimer < 0) immunityTimer = 0;
+          }
+        } else if (gameState === "finalExplosion") {
+          updateFinalExplosion(dt);
+        }
+        
+        ctx.fillStyle = "rgba(0, 0, 0, 0.2)";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        
+        if (gameState === "playing") {
+          circles.forEach(circle => circle.draw(ctx));
+          explosions.forEach(explosion => explosion.draw(ctx));
+          hitParticles.forEach(particle => particle.draw(ctx));
+          drawPlayer();
+          timerDisplay.innerText = `Time: ${scoreTimer.toFixed(2)} s`;
+          drawHealthBar();
+        } else if (gameState === "finalExplosion") {
+          finalParticles.forEach(particle => particle.draw(ctx));
+          hitParticles.forEach(particle => particle.draw(ctx));
+        }
+  
+        // Update the main menu title for a rainbow effect.
+        let hue = (Date.now() / 10) % 360;
+        menuTitle.style.color = `hsl(${hue}, 100%, 50%)`;
+      }
+      animate();
+      
+      /*************************
+       * Menu Controls
+       *************************/
+      document.getElementById("startButton").addEventListener("click", function() {
+        startGame();
+      });
+    }; // End window.onload
+  </script>
+</body>
+</html>
