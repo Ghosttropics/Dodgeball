@@ -1,0 +1,835 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Dodgeballv6</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <!-- Removed Howler.js script reference because sound effects and music are no longer used -->
+  <style>
+    /* Base Styles */
+    html, body {
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      background: #000;
+      font-family: Arial, sans-serif;
+    }
+    canvas {
+      display: block;
+    }
+    
+    /* Main Menu Overlay */
+    .overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0,0,0,0.85);
+      color: white;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      z-index: 10;
+      pointer-events: auto;
+    }
+    .overlay h1 {
+      margin-bottom: 20px;
+      font-size: 48px;
+      /* Rainbow effect applied in animation loop */
+    }
+    .overlay p,
+    .overlay label {
+      margin: 10px;
+      font-size: 20px;
+    }
+    .overlay button {
+      margin-top: 20px;
+      padding: 10px 20px;
+      font-size: 24px;
+      cursor: pointer;
+    }
+    
+    /* Scoreboard Overlay */
+    #scoreboardOverlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0,0,0,0.95);
+      color: white;
+      z-index: 15;
+      display: none;
+      overflow-y: auto;
+      padding: 20px;
+      font-size: 18px;
+    }
+    #scoreboardOverlay h2 {
+      margin-top: 0;
+    }
+    #scoreboardOverlay .scoreList {
+      margin-bottom: 20px;
+    }
+    #scoreboardOverlay button {
+      padding: 10px 20px;
+      font-size: 20px;
+      cursor: pointer;
+    }
+    
+    /* Timer & Health Bar Display */
+    #timerDisplay {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      color: white;
+      font-size: 24px;
+      z-index: 5;
+    }
+    #healthBar {
+      position: absolute;
+      top: 40px;
+      left: 10px;
+      width: 100px;
+      height: 20px;
+      border: 2px solid white;
+      z-index: 5;
+    }
+    #healthFill {
+      height: 100%;
+      background: green;
+      width: 100%;
+    }
+    
+    /* Ability Status Display (under HP) */
+    #abilityStatus {
+      position: absolute;
+      top: 65px;
+      left: 10px;
+      color: white;
+      font-size: 18px;
+      z-index: 5;
+    }
+    
+    /* Final Time Display on Menu */
+    #finalTimeMenu {
+      margin-top: 10px;
+      font-size: 20px;
+      color: lightgray;
+    }
+    
+    /* Pause Text (centered) */
+    #pauseText {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      font-size: 48px;
+      color: white;
+      z-index: 6;
+      display: none;
+    }
+    
+    /* Debug Menu Styles */
+    #debugMenu {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      background: rgba(0,0,0,0.8);
+      padding: 10px;
+      color: white;
+      z-index: 20;
+      display: none;
+      font-size: 14px;
+      border: 1px solid #666;
+    }
+    #debugMenu h3 {
+      margin: 0 0 10px;
+      font-size: 16px;
+    }
+    #debugMenu label {
+      display: block;
+      margin-bottom: 5px;
+    }
+    #debugMenu input[type="number"] {
+      width: 50px;
+    }
+    #debugMenu button {
+      margin-top: 5px;
+      display: block;
+      width: 100%;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="canvas"></canvas>
+  
+  <!-- Main Menu Overlay -->
+  <div id="startMenu" class="overlay">
+    <h1 id="menuTitle">Dodgeballv6</h1>
+    <p>Select Control Mode:</p>
+    <div>
+      <label>
+        <input type="radio" name="mode" value="mouse" checked> Mouse Control
+      </label>
+      <label>
+        <input type="radio" name="mode" value="keyboard"> Keyboard Control
+      </label>
+    </div>
+    <p>Select Difficulty:</p>
+    <div>
+      <label>
+        <input type="radio" name="difficulty" value="normal" checked> Normal
+      </label>
+      <label>
+        <input type="radio" name="difficulty" value="extra"> Extra Difficulty
+      </label>
+    </div>
+    <button id="startButton">Start Game</button>
+    <button id="scoreboardButton">Scoreboard</button>
+    <p id="finalTimeMenu"></p>
+  </div>
+  
+  <!-- Scoreboard Overlay -->
+  <div id="scoreboardOverlay">
+    <h2>Scoreboard</h2>
+    <div class="scoreList" id="normalScoreList">
+      <h3>Normal Difficulty</h3>
+      <ol id="normalScores"></ol>
+    </div>
+    <div class="scoreList" id="extraScoreList">
+      <h3>Extra Difficulty</h3>
+      <ol id="extraScores"></ol>
+    </div>
+    <button id="backFromScoreboard">Back</button>
+  </div>
+  
+  <!-- Pause Text -->
+  <div id="pauseText">Paused</div>
+  
+  <!-- Debug Menu (toggle with O) -->
+  <div id="debugMenu">
+    <h3>Debug Menu</h3>
+    <label>
+      <input type="checkbox" id="invincibleCheckbox"> Invincibility
+    </label>
+    <label>
+      Ball Speed Modifier: 
+      <input type="number" id="ballSpeedInput" value="1" step="0.1" min="0.1">
+    </label>
+    <label>
+      Ball Homing Modifier: 
+      <input type="number" id="ballHomingInput" value="1" step="0.1" min="0.1">
+    </label>
+    <label>
+      Spawn Rate Modifier: 
+      <input type="number" id="spawnRateInput" value="1" step="0.1" min="0.1">
+    </label>
+    <button id="spawnBallButton">Spawn Ball</button>
+  </div>
+  
+  <!-- Timer, Health Bar, and Ability Status Display -->
+  <div id="timerDisplay"></div>
+  <div id="healthBar"><div id="healthFill"></div></div>
+  <div id="abilityStatus"></div>
+  
+  <script>
+    // Removed sound effect code and references.
+    
+    // LocalStorage-based score storage for top 10 scores.
+    function updateLocalScoreboard(newScore, difficultyKey) {
+      let key = (difficultyKey === "extra") ? "scoreboard_extra" : "scoreboard_normal";
+      let scores = JSON.parse(localStorage.getItem(key) || "[]");
+      scores.push(newScore);
+      scores.sort((a, b) => b - a);
+      scores = scores.slice(0, 10);
+      localStorage.setItem(key, JSON.stringify(scores));
+    }
+    function displayScoreboard() {
+      let normalScores = JSON.parse(localStorage.getItem("scoreboard_normal") || "[]");
+      let extraScores = JSON.parse(localStorage.getItem("scoreboard_extra") || "[]");
+      let normalList = document.getElementById("normalScores");
+      let extraList = document.getElementById("extraScores");
+      normalList.innerHTML = "";
+      extraList.innerHTML = "";
+      normalScores.forEach(score => {
+        let li = document.createElement("li");
+        li.textContent = `${score.toFixed(2)} s`;
+        normalList.appendChild(li);
+      });
+      extraScores.forEach(score => {
+        let li = document.createElement("li");
+        li.textContent = `${score.toFixed(2)} s`;
+        extraList.appendChild(li);
+      });
+    }
+
+    window.onload = function() {
+      // Element references
+      const canvas = document.getElementById("canvas");
+      const ctx = canvas.getContext("2d");
+      const timerDisplay = document.getElementById("timerDisplay");
+      const healthFill = document.getElementById("healthFill");
+      const startMenu = document.getElementById("startMenu");
+      const menuTitle = document.getElementById("menuTitle");
+      const finalTimeMenu = document.getElementById("finalTimeMenu");
+      const pauseText = document.getElementById("pauseText");
+      const debugMenu = document.getElementById("debugMenu");
+      const abilityStatusText = document.getElementById("abilityStatus");
+      const scoreboardOverlay = document.getElementById("scoreboardOverlay");
+      const scoreboardButton = document.getElementById("scoreboardButton");
+      const backFromScoreboard = document.getElementById("backFromScoreboard");
+
+      // Debug Settings Object
+      let debugSettings = {
+        invincible: false,
+        ballSpeed: 1,
+        ballHoming: 1,
+        spawnRate: 1
+      };
+
+      // Ability capture variables & shockwave flag
+      let abilityCircle = null; // {x, y, radius, opacity, touched, timeSinceLastTouch}
+      let abilityCharge = 0;    // seconds inside capture circle
+      let hasShockwaveAbility = false;
+      let shockwaves = []; // active shockwave effects
+
+      function resizeCanvas() {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+      }
+      window.addEventListener("resize", resizeCanvas);
+      resizeCanvas();
+
+      // Global Game Variables
+      const player = { x: canvas.width/2, y: canvas.height/2, size: 20, speed: 200, hp: 100 };
+      let circles = [];
+      let explosions = [];
+      let finalParticles = [];
+      let hitParticles = [];
+      let scoreTimer = 0;
+      let finalTime = 0;
+      let spawnInterval;
+      let lastTime;
+      let immunityTimer = 0;
+      let gameState = "menu"; // "menu", "playing", "finalExplosion"
+      let controlMode = "mouse"; // "mouse" or "keyboard"
+      let difficultyMultiplier = 1;
+      let isPaused = false;
+      let pauseKeyPressed = false;
+      let rareParticles = [];
+
+      // Input Handling: keys in lower case.
+      const mouse = { x: player.x, y: player.y };
+      const keys = {};
+      window.addEventListener("mousemove", (e) => {
+        if (controlMode === "mouse") {
+          mouse.x = e.clientX;
+          mouse.y = e.clientY;
+        }
+      });
+      window.addEventListener("keydown", (e) => {
+        let key = e.key.toLowerCase();
+        // Toggle Debug Menu with "o"
+        if (key === "o") {
+          debugMenu.style.display = (debugMenu.style.display === "none" || debugMenu.style.display === "") ? "block" : "none";
+          e.preventDefault();
+          return;
+        }
+        if (["w", "a", "s", "d", "arrowup", "arrowleft", "arrowdown", "arrowright", "shift"].includes(key)) {
+          e.preventDefault();
+        }
+        if (key === "p" && gameState === "playing") {
+          if (!pauseKeyPressed) {
+            pauseKeyPressed = true;
+            isPaused = !isPaused;
+          }
+        }
+        keys[key] = true;
+      });
+      window.addEventListener("keyup", (e) => {
+        let key = e.key.toLowerCase();
+        if (key === "p") { pauseKeyPressed = false; }
+        keys[key] = false;
+      });
+
+      /***********************************
+       * Debug Menu Controls
+       ***********************************/
+      document.getElementById("invincibleCheckbox").addEventListener("change", function() {
+        debugSettings.invincible = this.checked;
+      });
+      document.getElementById("ballSpeedInput").addEventListener("change", function() {
+        debugSettings.ballSpeed = parseFloat(this.value);
+      });
+      document.getElementById("ballHomingInput").addEventListener("change", function() {
+        debugSettings.ballHoming = parseFloat(this.value);
+      });
+      document.getElementById("spawnRateInput").addEventListener("change", function() {
+        debugSettings.spawnRate = parseFloat(this.value);
+        clearInterval(spawnInterval);
+        spawnInterval = setInterval(spawnCircle, 800 / (difficultyMultiplier * debugSettings.spawnRate));
+      });
+      document.getElementById("spawnBallButton").addEventListener("click", function() {
+        spawnCircle();
+      });
+
+      /***********************************
+       * Shockwave Effect Class
+       ***********************************/
+      class Shockwave {
+        constructor(x, y) {
+          this.x = x;
+          this.y = y;
+          this.life = 0;
+          this.duration = 0.5;
+          this.startRadius = 0;
+          this.endRadius = 400;
+        }
+        update(dt) {
+          this.life += dt;
+        }
+        draw(ctx) {
+          let progress = this.life / this.duration;
+          let radius = this.startRadius + (this.endRadius - this.startRadius) * progress;
+          let alpha = 1 - progress;
+          ctx.beginPath();
+          ctx.strokeStyle = `rgba(255,255,0,${alpha.toFixed(2)})`;
+          ctx.lineWidth = 8;
+          ctx.arc(this.x, this.y, radius, 0, Math.PI*2);
+          ctx.stroke();
+        }
+      }
+
+      /***********************************
+       * Ball Classes & Debug Modifiers
+       ***********************************/
+      class Circle {
+        constructor(x, y, vx, vy, radius, color) {
+          this.x = x;
+          this.y = y;
+          this.vx = vx;
+          this.vy = vy;
+          this.radius = radius;
+          this.color = color;
+          this.rare = false;
+          this.lifetime = 0;
+        }
+        update(dt) {
+          const baseMaxSpeed = this.rare ? 300 : 200;
+          const baseHomingFactor = this.rare ? 1.5 : 0.8;
+          const effectiveMaxSpeed = baseMaxSpeed * difficultyMultiplier * debugSettings.ballSpeed;
+          const effectiveHomingFactor = baseHomingFactor * difficultyMultiplier * debugSettings.ballHoming;
+          let dx = player.x - this.x;
+          let dy = player.y - this.y;
+          let distance = Math.sqrt(dx*dx+dy*dy);
+          if (distance > 0) {
+            dx /= distance;
+            dy /= distance;
+            this.vx += dx * effectiveHomingFactor * 100 * dt;
+            this.vy += dy * effectiveHomingFactor * 100 * dt;
+          }
+          let speed = Math.sqrt(this.vx*this.vx + this.vy*this.vy);
+          if (speed > effectiveMaxSpeed) {
+            this.vx = (this.vx/speed)*effectiveMaxSpeed;
+            this.vy = (this.vy/speed)*effectiveMaxSpeed;
+          }
+          this.x += this.vx * dt;
+          this.y += this.vy * dt;
+          this.lifetime += dt;
+        }
+        draw(ctx) {
+          ctx.beginPath();
+          ctx.fillStyle = this.color;
+          ctx.arc(this.x, this.y, this.radius, 0, Math.PI*2);
+          ctx.fill();
+        }
+      }
+      class RareCircle extends Circle {
+        constructor(x, y, vx, vy, radius, color) {
+          super(x, y, vx, vy, radius, color);
+          this.rare = true;
+        }
+        draw(ctx) {
+          ctx.save();
+          ctx.shadowColor = "gold";
+          ctx.shadowBlur = 20;
+          ctx.fillStyle = this.color;
+          ctx.beginPath();
+          ctx.arc(this.x, this.y, this.radius, 0, Math.PI*2);
+          ctx.fill();
+          ctx.restore();
+          ctx.lineWidth = 3;
+          ctx.strokeStyle = "gold";
+          ctx.beginPath();
+          ctx.arc(this.x, this.y, this.radius, 0, Math.PI*2);
+          ctx.stroke();
+        }
+      }
+      class Explosion {
+        constructor(x, y) {
+          this.x = x;
+          this.y = y;
+          this.life = 0;
+          this.duration = 0.5;
+          this.startRadius = 10;
+          this.endRadius = 50;
+        }
+        update(dt) {
+          this.life += dt;
+        }
+        draw(ctx) {
+          const progress = this.life / this.duration;
+          const radius = this.startRadius + (this.endRadius - this.startRadius)*progress;
+          const alpha = 1 - progress;
+          ctx.beginPath();
+          ctx.fillStyle = `rgba(255,255,255,${alpha.toFixed(2)})`;
+          ctx.arc(this.x, this.y, radius, 0, Math.PI*2);
+          ctx.fill();
+        }
+      }
+      class Particle {
+        constructor(x, y, color) {
+          this.x = x;
+          this.y = y;
+          this.vx = (Math.random()*2-1)*300;
+          this.vy = (Math.random()*2-1)*300;
+          this.life = 0;
+          this.duration = 1.0;
+          this.color = color;
+          this.size = Math.random()*3+2;
+        }
+        update(dt) {
+          this.x += this.vx*dt;
+          this.y += this.vy*dt;
+          this.life += dt;
+        }
+        draw(ctx) {
+          let progress = this.life / this.duration;
+          if (progress > 1) progress = 1;
+          let alpha = 1 - progress;
+          let rgbaColor = this.color.replace("rgb","rgba").replace(")", `,${alpha.toFixed(2)})`);
+          ctx.fillStyle = rgbaColor;
+          ctx.beginPath();
+          ctx.arc(this.x, this.y, this.size, 0, Math.PI*2);
+          ctx.fill();
+        }
+      }
+
+      /*************************
+       * Game Functions
+       *************************/
+      function spawnCircle() {
+        if (gameState !== "playing" || isPaused) return;
+        let x, y;
+        const edge = Math.floor(Math.random()*4);
+        if (edge===0) { x = Math.random()*canvas.width; y = -20; }
+        else if (edge===1) { x = canvas.width+20; y = Math.random()*canvas.height; }
+        else if (edge===2) { x = Math.random()*canvas.width; y = canvas.height+20; }
+        else { x = -20; y = Math.random()*canvas.height; }
+        const vx = (Math.random()*2-1)*100*difficultyMultiplier;
+        const vy = (Math.random()*2-1)*100*difficultyMultiplier;
+        const radius = 10;
+        const r = Math.floor(Math.random()*256);
+        const g = Math.floor(Math.random()*256);
+        const b = Math.floor(Math.random()*256);
+        if (Math.random() < 0.05) {
+          circles.push(new RareCircle(x, y, vx, vy, radius, "rgb(255,215,0)"));
+        } else {
+          circles.push(new Circle(x, y, vx, vy, radius, `rgb(${r},${g},${b})`));
+        }
+      }
+      function spawnHitSparks() {
+        for (let i = 0; i < 20; i++) {
+          let spark = new Particle(player.x, player.y, "rgb(255,255,255)");
+          spark.duration = 0.5;
+          hitParticles.push(spark);
+        }
+      }
+      function handleGoldenBallCollision(goldenBall) {
+        if (!debugSettings.invincible && immunityTimer <= 0) {
+          player.hp = Math.max(player.hp - 75, 0);
+        }
+        for (let i = 0; i < 80; i++) {
+          finalParticles.push(new Particle(goldenBall.x, goldenBall.y, "rgb(255,215,0)"));
+        }
+        if (player.hp <= 0) { finalExplosion(); }
+      }
+      function checkCollisions() {
+        for (let i = circles.length - 1; i >= 0; i--) {
+          const circle = circles[i];
+          const dx = circle.x - player.x;
+          const dy = circle.y - player.y;
+          const distance = Math.sqrt(dx*dx+dy*dy);
+          if (distance < circle.radius + player.size/2) {
+            if (debugSettings.invincible) { 
+              circles.splice(i,1); 
+              continue; 
+            }
+            circles.splice(i,1); // Always remove the ball when collision occurs
+            if (immunityTimer > 0) {
+              spawnHitSparks();
+            } else {
+              if (circle.rare) {
+                handleGoldenBallCollision(circle);
+              } else {
+                player.hp = Math.max(player.hp - 50, 0);
+                spawnHitSparks();
+                immunityTimer = 2;
+              }
+            }
+            if (player.hp <= 0) { finalExplosion(); }
+            break;
+          }
+        }
+      }
+      function updatePlayer(dt) {
+        if (controlMode === "mouse") {
+          player.x += (mouse.x - player.x)*10*dt;
+          player.y += (mouse.y - player.y)*10*dt;
+        } else {
+          let currentSpeed = player.speed;
+          if (keys["shift"]) { currentSpeed = player.speed * 2; }
+          if (keys["w"] || keys["arrowup"]) player.y -= currentSpeed*dt;
+          if (keys["a"] || keys["arrowleft"]) player.x -= currentSpeed*dt;
+          if (keys["s"] || keys["arrowdown"]) player.y += currentSpeed*dt;
+          if (keys["d"] || keys["arrowright"]) player.x += currentSpeed*dt;
+          player.x = Math.max(player.size/2, Math.min(canvas.width-player.size/2, player.x));
+          player.y = Math.max(player.size/2, Math.min(canvas.height-player.size/2, player.y));
+        }
+      }
+      function drawPlayer() {
+        ctx.fillStyle = "white";
+        ctx.fillRect(player.x - player.size/2, player.y - player.size/2, player.size, player.size);
+        if (immunityTimer > 0) {
+          const hue = (Date.now()/10)%360;
+          ctx.strokeStyle = `hsl(${hue},100%,50%)`;
+          ctx.lineWidth = 4;
+          ctx.strokeRect(player.x - player.size/2 - 4, player.y - player.size/2 - 4, player.size+8, player.size+8);
+        }
+      }
+      function drawHealthBar() {
+        let perc = Math.max(0, Math.min(player.hp, 100));
+        healthFill.style.width = `${perc}px`;
+      }
+      // Shockwave ability: apply a powerful force and add a visual effect.
+      function activateShockwave() {
+        const force = 2000;
+        for (let i = 0; i < circles.length; i++) {
+          let circle = circles[i];
+          let dx = circle.x - player.x;
+          let dy = circle.y - player.y;
+          let dist = Math.max(Math.sqrt(dx*dx+dy*dy),1);
+          circle.vx += (dx/dist)*force;
+          circle.vy += (dy/dist)*force;
+        }
+        shockwaves.push(new Shockwave(player.x, player.y));
+        hasShockwaveAbility = false;
+      }
+      function finalExplosion() {
+        clearInterval(spawnInterval);
+        for (let i = 0; i < 50; i++) {
+          finalParticles.push(new Particle(player.x, player.y, "rgb(255,255,255)"));
+        }
+        circles.forEach(circle => {
+          for (let i = 0; i < 20; i++) {
+            finalParticles.push(new Particle(circle.x, circle.y, circle.color));
+          }
+        });
+        circles = [];
+        explosions = [];
+        gameState = "finalExplosion";
+      }
+      function updateFinalExplosion(dt) {
+        finalParticles.forEach(particle => particle.update(dt));
+        hitParticles.forEach(particle => particle.update(dt));
+        finalParticles = finalParticles.filter(p => p.life < p.duration);
+        hitParticles = hitParticles.filter(p => p.life < p.duration);
+        if (finalParticles.length === 0 && hitParticles.length === 0) { endGameFinal(); }
+      }
+      function endGameFinal() {
+        gameState = "menu";
+        let difficultyKey = (difficultyMultiplier === 1) ? "normal" : "extra";
+        updateLocalScoreboard(scoreTimer, difficultyKey);
+        finalTime = scoreTimer;
+        finalTimeMenu.innerText = `Final Time: ${finalTime.toFixed(2)} s`;
+        startMenu.style.display = "flex";
+      }
+      
+      /*************************
+       * Ability Capture Circle Logic
+       *************************/
+      // Only one capture circle can exist at a time.
+      function updateAbilityCircle(dt) {
+        if (!hasShockwaveAbility && abilityCircle === null) {
+          if (Math.random() < 0.01 * dt) {
+            abilityCircle = {
+              x: Math.random()*canvas.width,
+              y: Math.random()*canvas.height,
+              radius: 100,  // 2x size compared to previous version
+              opacity: 1,
+              touched: false,
+              timeSinceLastTouch: 0
+            };
+            abilityCharge = 0;
+          }
+        }
+        if (abilityCircle !== null) {
+          let dxA = abilityCircle.x - player.x;
+          let dyA = abilityCircle.y - player.y;
+          let distA = Math.sqrt(dxA*dxA + dyA*dyA);
+          if (distA < abilityCircle.radius) {
+            abilityCircle.touched = true;
+            abilityCircle.timeSinceLastTouch = 0;
+            abilityCircle.opacity = Math.min(abilityCircle.opacity + dt, 1);
+            abilityCharge += dt;
+            if (abilityCharge >= 10) {
+              hasShockwaveAbility = true;
+              abilityCircle = null;
+              abilityCharge = 0;
+            }
+          } else {
+            abilityCharge = 0;
+            abilityCircle.timeSinceLastTouch += dt;
+            let fadeRate = abilityCircle.touched ? (1/2) : (1/10);
+            abilityCircle.opacity -= dt * fadeRate;
+            if (abilityCircle.opacity <= 0) {
+              abilityCircle = null;
+            }
+          }
+        }
+      }
+      function drawAbilityCircle() {
+        if (abilityCircle !== null) {
+          ctx.save();
+          ctx.globalAlpha = abilityCircle.opacity;
+          ctx.strokeStyle = "red";
+          ctx.lineWidth = 4;
+          ctx.beginPath();
+          ctx.arc(abilityCircle.x, abilityCircle.y, abilityCircle.radius, 0, Math.PI*2);
+          ctx.stroke();
+          let dxA = abilityCircle.x - player.x;
+          let dyA = abilityCircle.y - player.y;
+          let distA = Math.sqrt(dxA*dxA + dyA*dyA);
+          if (distA < abilityCircle.radius) {
+            let barWidth = abilityCircle.radius * 1.5;
+            let barHeight = 10;
+            let progress = abilityCharge / 10;
+            ctx.fillStyle = "red";
+            ctx.fillRect(abilityCircle.x - barWidth/2, abilityCircle.y - barHeight/2, barWidth * progress, barHeight);
+          }
+          ctx.restore();
+        }
+      }
+      
+      /*************************
+       * Main Animation Loop
+       *************************/
+      function animate() {
+        requestAnimationFrame(animate);
+        const now = performance.now();
+        const dt = (now - lastTime)/1000;
+        lastTime = now;
+        if (gameState === "playing") {
+          if (!isPaused) {
+            scoreTimer += dt;
+            if (player.hp > 0) {
+              player.hp = Math.min(player.hp + 1*dt, 100);
+            }
+            updatePlayer(dt);
+            checkCollisions();
+            circles.forEach(circle => circle.update(dt));
+            circles = circles.filter(circle => !(circle.rare && circle.lifetime > 15));
+            explosions.forEach(explosion => explosion.update(dt));
+            hitParticles.forEach(particle => particle.update(dt));
+            rareParticles.forEach(particle => particle.update(dt));
+            rareParticles = rareParticles.filter(p => p.life < p.duration);
+            if (immunityTimer > 0) {
+              immunityTimer -= dt;
+              if (immunityTimer < 0) { immunityTimer = 0; }
+            }
+            if (keys["e"] && hasShockwaveAbility) {
+              activateShockwave();
+              keys["e"] = false;
+            }
+            updateAbilityCircle(dt);
+          }
+        } else if (gameState === "finalExplosion") {
+          updateFinalExplosion(dt);
+        }
+        shockwaves.forEach(sw => sw.update(dt));
+        shockwaves.forEach(sw => sw.draw(ctx));
+        shockwaves = shockwaves.filter(sw => sw.life < sw.duration);
+        ctx.fillStyle = "rgba(0,0,0,0.2)";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        if (gameState === "playing") {
+          circles.forEach(circle => circle.draw(ctx));
+          explosions.forEach(explosion => explosion.draw(ctx));
+          hitParticles.forEach(particle => particle.draw(ctx));
+          rareParticles.forEach(particle => particle.draw(ctx));
+          drawPlayer();
+          drawAbilityCircle();
+          timerDisplay.innerText = `Time: ${scoreTimer.toFixed(2)} s`;
+          drawHealthBar();
+        } else if (gameState === "finalExplosion") {
+          finalParticles.forEach(particle => particle.draw(ctx));
+          hitParticles.forEach(particle => particle.draw(ctx));
+        }
+        let hue = (Date.now()/10)%360;
+        menuTitle.style.color = `hsl(${hue},100%,50%)`;
+        if (isPaused && gameState === "playing") {
+          pauseText.style.display = "block";
+          pauseText.innerText = "Paused";
+        } else {
+          pauseText.style.display = "none";
+        }
+        abilityStatusText.innerText = hasShockwaveAbility ? "Shockwave: READY (press E)" : "Shockwave: Not Ready";
+      }
+      
+      lastTime = performance.now();
+      animate();
+      
+      /*************************
+       * Menu Controls
+       *************************/
+      document.getElementById("startButton").addEventListener("click", () => {
+        controlMode = document.querySelector('input[name="mode"]:checked').value;
+        difficultyMultiplier = (document.querySelector('input[name="difficulty"]:checked').value === "extra") ? 2 : 1;
+        player.x = canvas.width/2;
+        player.y = canvas.height/2;
+        player.hp = 100;
+        circles = [];
+        explosions = [];
+        finalParticles = [];
+        hitParticles = [];
+        rareParticles = [];
+        scoreTimer = 0;
+        finalTime = 0;
+        gameState = "playing";
+        lastTime = performance.now();
+        immunityTimer = 0;
+        isPaused = false;
+        pauseKeyPressed = false;
+        pauseText.style.display = "none";
+        hasShockwaveAbility = false;
+        abilityCircle = null;
+        abilityCharge = 0;
+        shockwaves = [];
+        clearInterval(spawnInterval);
+        spawnInterval = setInterval(spawnCircle, 800 / (difficultyMultiplier * debugSettings.spawnRate));
+        startMenu.style.display = "none";
+      });
+      scoreboardButton.addEventListener("click", () => {
+        startMenu.style.display = "none";
+        displayScoreboard();
+        scoreboardOverlay.style.display = "block";
+      });
+      backFromScoreboard.addEventListener("click", () => {
+        scoreboardOverlay.style.display = "none";
+        startMenu.style.display = "flex";
+      });
+    };
+  </script>
+</body>
+</html>
